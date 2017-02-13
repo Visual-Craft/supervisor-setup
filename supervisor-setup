@@ -1,0 +1,316 @@
+#!/bin/sh
+
+set -ue
+sv_echo() { echo "$@" 1>&2; }
+sv_echo_block_start() { sv_echo '{'; }
+sv_echo_block() { sv_echo "  $@"; }
+sv_echo_block_end() { sv_echo '}'; }
+
+
+
+script_version="1.0"
+# path to directory, where local supervisor files will be stored (relative to user's home directory)
+local_sub_path=".supervisor"
+
+
+
+sv_echo "== Supervisor setup script v${script_version}"
+
+sv_echo_block_start
+sv_echo_block "Checking environment"
+target_user="${1-}"
+if [ -z "$target_user" ]; then
+    sv_echo_block "Error: target user name should be provided (e.g. '$0 user_name')"
+    sv_echo_block_end
+    exit 1
+else
+    sv_echo_block "* User name '$target_user' is provided"
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    sv_echo_block "Error: this script is intended to be run by root"
+    sv_echo_block_end
+    exit 1
+else
+    sv_echo_block "* Running from root"
+fi
+
+if which dpkg > /dev/null 2>&1; then
+    sv_echo_block "* Running on Debian-based system"
+
+    system_type="debian"
+    supervisor_package="supervisor"
+    supervisord_bin="/usr/bin/supervisord"
+    supervisorctl_bin="/usr/bin/supervisorctl"
+    supervisor_global_conf_d="/etc/supervisor/conf.d"
+else
+    sv_echo_block "Error: this script is intended to be run on Debian based systems"
+    sv_echo_block_end
+    exit 1
+fi
+
+set +e
+target_user_id="$(id -u ${target_user} 2>/dev/null)"
+set -e
+
+if [ -z "$target_user_id" ]; then
+    sv_echo_block "Error: target user is missing"
+    sv_echo_block_end
+    exit 1
+else
+    sv_echo_block "* Target user is exist"
+fi
+
+if [ "$target_user_id" -lt 1000 ]; then
+    sv_echo_block "Error: target user should not be system account"
+    sv_echo_block_end
+    exit 1
+else
+    sv_echo_block "* Target user is not a system account"
+fi
+
+target_user_home="$(su ${target_user} -c 'echo $HOME')"
+
+if [ -z "$target_user_home" ]; then
+    sv_echo_block "Error: unable to get home directory of target user"
+    sv_echo_block_end
+    exit 1
+else
+    sv_echo_block "* Detected target user home directory '$target_user_home'"
+fi
+
+local_path="$target_user_home/$local_sub_path"
+local_ctl_bin="$local_path/bin/sv-ctl"
+local_create_bin="$local_path/bin/sv-create"
+local_config="$local_path/etc/supervisord.conf"
+
+if [ -e "$local_config" ]; then
+    sv_echo_block "Error: local config file '$local_config' already exists"
+    sv_echo_block_end
+    exit 1
+fi
+
+for bin in "$local_ctl_bin" "$local_create_bin"; do
+    if [ -e "$bin" ]; then
+        sv_echo_block "Error: local bin '$bin' already exists"
+        sv_echo_block_end
+        exit 1
+    fi
+done
+
+sv_echo_block "* Using local path '$local_path'"
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Supervisor install
+#
+sv_echo_block_start
+sv_echo_block "Installing Supervisor"
+
+case "$system_type" in
+    "debian")
+        if dpkg -s ${supervisor_package} > /dev/null 2>&1; then
+            sv_echo_block "Ok (already installed)"
+            sv_echo_block_end
+        else
+            if ! which apt-get > /dev/null 2>&1; then
+                sv_echo_block "Error, 'apt-get' is missing"
+                sv_echo_block_end
+                exit 1
+            fi
+
+            if apt-get install -y --no-install-recommends ${supervisor_package} > /dev/null 2>&1; then
+                sv_echo_block "Ok"
+                sv_echo_block_end
+            else
+                sv_echo_block "Error"
+                sv_echo_block_end
+                exit 1
+            fi
+        fi
+    ;;
+esac
+
+
+
+#
+# Supervisor validate
+#
+sv_echo_block_start
+sv_echo_block "Validating Supervisor install"
+
+for bin in "$supervisord_bin" "$supervisorctl_bin"; do
+    if [ ! -e "$bin" ]; then
+        sv_echo_block "Error: Supervisor binary '$bin' is missing"
+        sv_echo_block_end
+        exit 1
+    fi
+done
+
+if [ ! -e "$supervisor_global_conf_d" ]; then
+    sv_echo_block "Error: Supervisor config directory '$supervisor_global_conf_d' is missing"
+    sv_echo_block_end
+    exit 1
+fi
+
+sv_run_config="$supervisor_global_conf_d/$target_user-supervisor.conf"
+if [ -e "$sv_run_config" ]; then
+    sv_echo_block "Error: config file '$sv_run_config' already exists"
+    sv_echo_block_end
+    exit 1
+fi
+
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Local directory structure
+#
+sv_echo_block_start
+sv_echo_block "Creating directory structure using target path '$local_path'"
+
+for d in "$local_path" "$local_path/bin" "$local_path/etc" "$local_path/etc/conf.d" "$local_path/run" "$local_path/log"; do
+    if [ ! -e "$d" ]; then
+        sv_echo_block "* '$d'"
+        su ${target_user} -c "mkdir '${d}'"
+    else
+        sv_echo_block "* Skipping '$d', already exists"
+    fi
+done
+
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Local config
+#
+sv_echo_block_start
+sv_echo_block "Creating local config file '$local_config'"
+
+cat <<- EOM | su ${target_user} -c "cat > ${local_config}"
+[unix_http_server]
+file=${local_path}/run/supervisor.sock
+chmod=0700
+
+[supervisord]
+logfile=${local_path}/log/supervisord.log
+pidfile=${local_path}/run/supervisord.pid
+childlogdir=${local_path}/log
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix://${local_path}/run/supervisor.sock
+
+[include]
+files = ${local_path}/etc/conf.d/*.conf
+EOM
+
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# executables
+#
+sv_echo_block_start
+sv_echo_block "Creating executables"
+
+# sv-ctl
+sv_echo_block "* '$local_ctl_bin'"
+cat <<- EOM | su ${target_user} -c "cat > ${local_ctl_bin}"
+#!/bin/sh
+
+/usr/bin/supervisorctl -c ${local_config} \$@
+EOM
+chmod u+x "$local_ctl_bin"
+
+# sv-create
+sv_echo_block "* '$local_create_bin'"
+cat <<- EOM_ | su ${target_user} -c "cat > ${local_create_bin}"
+#!/bin/sh
+
+set -ue
+sv_echo() { echo "\$@" 1>&2; }
+
+target_dir="${local_path}/etc/conf.d"
+name="\${1-}"
+command="\${2-}"
+
+if [ -z "\$name" -o -z "\$command" ]; then
+    sv_echo "Usage: \$0 name command"
+    exit 1
+fi
+
+config="\$target_dir/\${name}.conf"
+
+if [ -e "\$config" ]; then
+    sv_echo "Target config file '\$config' already exists"
+    exit 1
+fi
+
+cat <<- EOM > "\${config}"
+[program:\${name}]
+command=\${command}
+EOM
+
+sv_echo "'\${config}' created"
+
+EOM_
+chmod u+x "$local_create_bin"
+
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Global config setup
+#
+sv_echo_block_start
+sv_echo_block "Creating global config '$sv_run_config'"
+cat <<- EOM > ${sv_run_config}
+[program:${target_user}-supervisor]
+command=${supervisord_bin} -n -c ${local_config}
+user=${target_user}
+EOM
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Supervisor start
+#
+sv_echo_block_start
+sv_echo_block "Starting local supervisor process"
+"$supervisorctl_bin" update > /dev/null 2>&1
+sv_echo_block "Ok"
+sv_echo_block_end
+
+
+
+#
+# Notes
+#
+sv_echo_block_start
+sv_echo_block "Notes"
+sv_echo_block "For convenience you can add '$local_path/bin' to your PATH"
+
+case "$system_type" in
+    "debian")
+        sv_echo_block "On Debian add the following to '$target_user_home/.profile':"
+        sv_echo_block "  export PATH=\"\$HOME/${local_sub_path}/bin:\$PATH\""
+    ;;
+esac
+
+sv_echo_block_end
