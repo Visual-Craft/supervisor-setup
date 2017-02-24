@@ -135,6 +135,7 @@ fi
 local_path="$target_user_home/$local_sub_path"
 local_ctl_bin="$local_path/bin/sv-ctl"
 local_create_bin="$local_path/bin/sv-create"
+local_install_bin="$local_path/bin/sv-install"
 local_config="$local_path/etc/supervisord.conf"
 sv_run_config="$supervisor_global_conf_d/$target_user-supervisor.conf"
 
@@ -359,6 +360,75 @@ EOM
 sv_echo "'\${config}' created"
 EOM_
 su "${target_user}" -c "chmod u+x "${local_create_bin}""
+
+# sv-install
+sv_echo_block "+ '$local_install_bin'"
+cat <<- EOM_ | su "${target_user}" -c "cat > "${local_install_bin}""
+#!/bin/sh
+
+set -ue
+sv_echo() { echo "\$@" 1>&2; }
+
+target_dir="${local_path}/etc/conf.d"
+sv_ctl_bin="${local_ctl_bin}"
+update=""
+
+args="\$(getopt -o u -l "update" -n "\$0" -- "\$@")"
+
+if [ \$? -ne 0 ]; then
+    exit 1
+fi
+
+eval set -- "\${args}"
+
+while true; do
+    case "\$1" in
+        -u|--update)
+            update="y"
+            shift
+        ;;
+        --)
+            shift
+            break
+        ;;
+        *)
+            echo "Unsupported option '\$1'"
+            exit 1
+        ;;
+    esac
+done
+
+config="\${1-}"
+id="\${2-}"
+
+if [ -z "\$id" -o -z "\$config" ]; then
+    sv_echo "Usage: \$0 config id"
+    exit 1
+fi
+
+if [ ! -f "\${config}" ]; then
+    sv_echo "'\${config}' is missing or not a file"
+    exit 1
+fi
+
+output="\${target_dir}/\${id}.conf"
+
+if [ "\$update" != "y" -a -e "\$output" ]; then
+    sv_echo "Output config file '\$output' already exists"
+    exit 1
+fi
+
+content="cat << __EOM_SV_INSTALL__
+\$(cat \${config})
+__EOM_SV_INSTALL__
+"
+
+root_dir="\$(readlink -f "\$(dirname "\$config")")"
+echo "\$(eval "\${content}")" > "\$output"
+sv_echo "'\$output' installed"
+sv_echo "Run '\$sv_ctl_bin update' to activate new configuration"
+EOM_
+su "${target_user}" -c "chmod u+x "${local_install_bin}""
 
 sv_echo_block "= Ok"
 sv_echo_block_end
