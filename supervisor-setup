@@ -357,7 +357,6 @@ command=\${command}
 EOM
 
 sv_echo "'\${config}' created"
-
 EOM_
 su "${target_user}" -c "chmod u+x "${local_create_bin}""
 
