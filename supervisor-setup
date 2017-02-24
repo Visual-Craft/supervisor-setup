@@ -1,42 +1,95 @@
 #!/bin/sh
 
 set -ue
-sv_echo() { echo "$@" 1>&2; }
-sv_echo_block_start() { sv_echo '{'; }
-sv_echo_block() { sv_echo "  $@"; }
-sv_echo_block_end() { sv_echo '}'; }
-
-
 
 script_version="1.0"
 # path to directory, where local supervisor files will be stored (relative to user's home directory)
 local_sub_path=".supervisor"
+script="$0"
+update=""
+remove=""
 
+sv_echo() {
+    echo "$@" 1>&2
+}
+sv_echo_block_start() {
+    sv_echo "[ $@ ]"
+}
+sv_echo_block() {
+    sv_echo "  $@"
+}
+sv_echo_block_end() {
+    sv_echo ''
+}
+sv_usage() {
+    sv_echo "Usage: $script user [options]"
+    sv_echo "Options:"
+    sv_echo "  -u update mode (overwrite existing installation)"
+    sv_echo "  -r remove mode (remove existing installation)"
+}
 
+sv_echo "== Supervisor setup script v${script_version}\n"
 
-sv_echo "== Supervisor setup script v${script_version}"
+args="$(getopt -o urh -l "update,remove,help" -n "$script" -- "$@")"
 
-sv_echo_block_start
-sv_echo_block "Checking environment"
-target_user="${1-}"
-if [ -z "$target_user" ]; then
-    sv_echo_block "Error: target user name should be provided (e.g. '$0 user_name')"
-    sv_echo_block_end
+if [ $? -ne 0 ]; then
     exit 1
-else
-    sv_echo_block "* User name '$target_user' is provided"
 fi
 
+eval set -- "${args}"
+
+while true; do
+    case "$1" in
+        -u|--update)
+            update="y"
+            shift
+        ;;
+        -r|--remove)
+            remove="y"
+            shift
+        ;;
+        -h|--help)
+            sv_usage
+            exit 0
+        ;;
+        --)
+            shift
+            break
+        ;;
+        *)
+            sv_echo "Unsupported option '$1'"
+            exit 1
+        ;;
+    esac
+done
+
+if [ "$update" = "y" -a "$remove" = "y" ]; then
+    sv_echo "Unable to use update and remove mode at the same time"
+    exit 1
+fi
+
+target_user="${1-}"
+if [ -z "$target_user" ]; then
+    sv_echo "Target user name should be provided"
+    sv_usage
+    exit 1
+fi
+
+
+
+sv_echo_block_start "Checking environment"
+sv_echo_block "+ User name '$target_user' is provided"
+
 if [ "$(id -u)" -ne 0 ]; then
-    sv_echo_block "Error: this script is intended to be run by root"
+    sv_echo_block "= Error: this script is intended to be run by root"
     sv_echo_block_end
     exit 1
 else
-    sv_echo_block "* Running from root"
+    sv_echo_block "+ Running from root"
 fi
 
 if which dpkg > /dev/null 2>&1; then
-    sv_echo_block "* Running on Debian-based system"
+    sv_echo_block "+ Running on Debian-based system"
 
     system_type="debian"
     supervisor_package="supervisor"
@@ -44,7 +97,7 @@ if which dpkg > /dev/null 2>&1; then
     supervisorctl_bin="/usr/bin/supervisorctl"
     supervisor_global_conf_d="/etc/supervisor/conf.d"
 else
-    sv_echo_block "Error: this script is intended to be run on Debian based systems"
+    sv_echo_block "= Error: this script is intended to be run on Debian based systems"
     sv_echo_block_end
     exit 1
 fi
@@ -54,52 +107,90 @@ target_user_id="$(id -u ${target_user} 2>/dev/null)"
 set -e
 
 if [ -z "$target_user_id" ]; then
-    sv_echo_block "Error: target user is missing"
+    sv_echo_block "= Error: target user is missing"
     sv_echo_block_end
     exit 1
 else
-    sv_echo_block "* Target user is exist"
+    sv_echo_block "+ Target user is exist"
 fi
 
 if [ "$target_user_id" -lt 1000 ]; then
-    sv_echo_block "Error: target user should not be system account"
+    sv_echo_block "= Error: target user should not be system account"
     sv_echo_block_end
     exit 1
 else
-    sv_echo_block "* Target user is not a system account"
+    sv_echo_block "+ Target user is not a system account"
 fi
 
-target_user_home="$(su ${target_user} -c 'echo $HOME')"
+target_user_home="$(su "${target_user}" -c 'echo $HOME')"
 
 if [ -z "$target_user_home" ]; then
-    sv_echo_block "Error: unable to get home directory of target user"
+    sv_echo_block "= Error: unable to get home directory of target user"
     sv_echo_block_end
     exit 1
 else
-    sv_echo_block "* Detected target user home directory '$target_user_home'"
+    sv_echo_block "+ Detected target user home directory '$target_user_home'"
 fi
 
 local_path="$target_user_home/$local_sub_path"
 local_ctl_bin="$local_path/bin/sv-ctl"
 local_create_bin="$local_path/bin/sv-create"
 local_config="$local_path/etc/supervisord.conf"
+sv_run_config="$supervisor_global_conf_d/$target_user-supervisor.conf"
 
-if [ -e "$local_config" ]; then
-    sv_echo_block "Error: local config file '$local_config' already exists"
+sv_echo_block "+ Using local path '$local_path'"
+
+sv_echo_block "= Ok"
+sv_echo_block_end
+
+
+
+if [ "$remove" = "y" ]; then
+    sv_echo_block_start "Removing"
+
+    if [ -e "$local_path" ]; then
+        su "${target_user}" -c "rm -rf '$local_path'"
+        sv_echo_block "+ '$local_path'"
+    fi
+
+    if [ -e "$sv_run_config" ]; then
+        rm -f "$sv_run_config"
+        sv_echo_block "+ '$local_path'"
+    fi
+
+    sv_echo_block "Updating global supervisor process"
+    "$supervisorctl_bin" update > /dev/null 2>&1
+
+    sv_echo_block "= Ok"
     sv_echo_block_end
-    exit 1
+    exit 0
+else
+    sv_echo_block_start "Checking local files"
+
+    if [ -e "$local_config" ]; then
+        if [ "$update" != "y" ]; then
+            sv_echo_block "= Error: local config file '$local_config' already exists"
+            sv_echo_block_end
+            exit 1
+        else
+            sv_echo_block "~ Notice: local config file '$local_config' already exists and will be replaced"
+        fi
+    fi
+
+    for bin in "$local_ctl_bin" "$local_create_bin"; do
+        if [ -e "$bin" ]; then
+            if [ "$update" != "y" ]; then
+                sv_echo_block "Error: local bin '$bin' already exists"
+                sv_echo_block_end
+                exit 1
+            else
+                sv_echo_block "~ Notice: local bin '$bin' already exists and will be replaced"
+            fi
+        fi
+    done
 fi
 
-for bin in "$local_ctl_bin" "$local_create_bin"; do
-    if [ -e "$bin" ]; then
-        sv_echo_block "Error: local bin '$bin' already exists"
-        sv_echo_block_end
-        exit 1
-    fi
-done
-
-sv_echo_block "* Using local path '$local_path'"
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -107,26 +198,25 @@ sv_echo_block_end
 #
 # Supervisor install
 #
-sv_echo_block_start
-sv_echo_block "Installing Supervisor"
+sv_echo_block_start "Installing Supervisor"
 
 case "$system_type" in
     "debian")
-        if dpkg -s ${supervisor_package} > /dev/null 2>&1; then
-            sv_echo_block "Ok (already installed)"
+        if dpkg -s "${supervisor_package}" > /dev/null 2>&1; then
+            sv_echo_block "= Ok (already installed)"
             sv_echo_block_end
         else
             if ! which apt-get > /dev/null 2>&1; then
-                sv_echo_block "Error, 'apt-get' is missing"
+                sv_echo_block "= Error, 'apt-get' is missing"
                 sv_echo_block_end
                 exit 1
             fi
 
-            if apt-get install -y --no-install-recommends ${supervisor_package} > /dev/null 2>&1; then
-                sv_echo_block "Ok"
+            if apt-get install -y --no-install-recommends "${supervisor_package}" > /dev/null 2>&1; then
+                sv_echo_block "= Ok"
                 sv_echo_block_end
             else
-                sv_echo_block "Error"
+                sv_echo_block "= Error"
                 sv_echo_block_end
                 exit 1
             fi
@@ -139,31 +229,33 @@ esac
 #
 # Supervisor validate
 #
-sv_echo_block_start
-sv_echo_block "Validating Supervisor install"
+sv_echo_block_start "Validating Supervisor install"
 
 for bin in "$supervisord_bin" "$supervisorctl_bin"; do
     if [ ! -e "$bin" ]; then
-        sv_echo_block "Error: Supervisor binary '$bin' is missing"
+        sv_echo_block "= Error: Supervisor binary '$bin' is missing"
         sv_echo_block_end
         exit 1
     fi
 done
 
 if [ ! -e "$supervisor_global_conf_d" ]; then
-    sv_echo_block "Error: Supervisor config directory '$supervisor_global_conf_d' is missing"
+    sv_echo_block "= Error: Supervisor config directory '$supervisor_global_conf_d' is missing"
     sv_echo_block_end
     exit 1
 fi
 
-sv_run_config="$supervisor_global_conf_d/$target_user-supervisor.conf"
 if [ -e "$sv_run_config" ]; then
-    sv_echo_block "Error: config file '$sv_run_config' already exists"
-    sv_echo_block_end
-    exit 1
+    if [ "$update" != "y" ]; then
+        sv_echo_block "= Error: config file '$sv_run_config' already exists"
+        sv_echo_block_end
+        exit 1
+    else
+        sv_echo_block "~ Notice: config file '$sv_run_config' already exists and will be replaces"
+    fi
 fi
 
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -171,19 +263,18 @@ sv_echo_block_end
 #
 # Local directory structure
 #
-sv_echo_block_start
-sv_echo_block "Creating directory structure using target path '$local_path'"
+sv_echo_block_start "Creating directory structure using target path '$local_path'"
 
 for d in "$local_path" "$local_path/bin" "$local_path/etc" "$local_path/etc/conf.d" "$local_path/run" "$local_path/log"; do
     if [ ! -e "$d" ]; then
-        sv_echo_block "* '$d'"
-        su ${target_user} -c "mkdir '${d}'"
+        sv_echo_block "+ '$d'"
+        su "${target_user}" -c "mkdir '${d}'"
     else
-        sv_echo_block "* Skipping '$d', already exists"
+        sv_echo_block "+ Skipping '$d', already exists"
     fi
 done
 
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -191,10 +282,9 @@ sv_echo_block_end
 #
 # Local config
 #
-sv_echo_block_start
-sv_echo_block "Creating local config file '$local_config'"
+sv_echo_block_start "Creating local config file '$local_config'"
 
-cat <<- EOM | su ${target_user} -c "cat > ${local_config}"
+cat <<- EOM | su "${target_user}" -c "cat > "${local_config}""
 [unix_http_server]
 file=${local_path}/run/supervisor.sock
 chmod=0700
@@ -214,7 +304,7 @@ serverurl=unix://${local_path}/run/supervisor.sock
 files = ${local_path}/etc/conf.d/*.conf
 EOM
 
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -222,21 +312,24 @@ sv_echo_block_end
 #
 # executables
 #
-sv_echo_block_start
-sv_echo_block "Creating executables"
+sv_echo_block_start "Creating executables"
+
+if [ "$update" = "y" -a -e "${local_path}/bin" ]; then
+    su "${target_user}" -c "rm "${local_path}/bin/*""
+fi
 
 # sv-ctl
-sv_echo_block "* '$local_ctl_bin'"
-cat <<- EOM | su ${target_user} -c "cat > ${local_ctl_bin}"
+sv_echo_block "+ '$local_ctl_bin'"
+cat <<- EOM | su "${target_user}" -c "cat > "${local_ctl_bin}""
 #!/bin/sh
 
 /usr/bin/supervisorctl -c ${local_config} \$@
 EOM
-chmod u+x "$local_ctl_bin"
+su "${target_user}" -c "chmod u+x "${local_ctl_bin}""
 
 # sv-create
-sv_echo_block "* '$local_create_bin'"
-cat <<- EOM_ | su ${target_user} -c "cat > ${local_create_bin}"
+sv_echo_block "+ '$local_create_bin'"
+cat <<- EOM_ | su "${target_user}" -c "cat > "${local_create_bin}""
 #!/bin/sh
 
 set -ue
@@ -266,9 +359,9 @@ EOM
 sv_echo "'\${config}' created"
 
 EOM_
-chmod u+x "$local_create_bin"
+su "${target_user}" -c "chmod u+x "${local_create_bin}""
 
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -276,14 +369,14 @@ sv_echo_block_end
 #
 # Global config setup
 #
-sv_echo_block_start
-sv_echo_block "Creating global config '$sv_run_config'"
-cat <<- EOM > ${sv_run_config}
+sv_echo_block_start "Creating global config '$sv_run_config'"
+
+cat <<- EOM > "${sv_run_config}"
 [program:${target_user}-supervisor]
 command=${supervisord_bin} -n -c ${local_config}
 user=${target_user}
 EOM
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -291,10 +384,9 @@ sv_echo_block_end
 #
 # Supervisor start
 #
-sv_echo_block_start
-sv_echo_block "Starting local supervisor process"
+sv_echo_block_start "Starting local supervisor process"
 "$supervisorctl_bin" update > /dev/null 2>&1
-sv_echo_block "Ok"
+sv_echo_block "= Ok"
 sv_echo_block_end
 
 
@@ -302,13 +394,12 @@ sv_echo_block_end
 #
 # Notes
 #
-sv_echo_block_start
-sv_echo_block "Notes"
+sv_echo_block_start "Notes"
 sv_echo_block "For convenience you can add '$local_path/bin' to your PATH"
 
 case "$system_type" in
     "debian")
-        sv_echo_block "On Debian add the following to '$target_user_home/.profile':"
+        sv_echo_block "On Debian add the following line to '$target_user_home/.profile':"
         sv_echo_block "  export PATH=\"\$HOME/${local_sub_path}/bin:\$PATH\""
     ;;
 esac
