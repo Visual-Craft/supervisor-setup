@@ -8,6 +8,7 @@ local_sub_path=".supervisor"
 script="$0"
 update=""
 remove=""
+extended_env=""
 
 sv_echo() {
     echo "$@" 1>&2
@@ -30,7 +31,7 @@ sv_usage() {
 
 sv_echo "== Supervisor setup script v${script_version}\n"
 
-args="$(getopt -o urh -l "update,remove,help" -n "$script" -- "$@")"
+args="$(getopt -o urhe -l "update,remove,help" -n "$script" -- "$@")"
 
 if [ $? -ne 0 ]; then
     exit 1
@@ -46,6 +47,10 @@ while true; do
         ;;
         -r|--remove)
             remove="y"
+            shift
+        ;;
+        -e)
+            extended_env="y"
             shift
         ;;
         -h|--help)
@@ -130,6 +135,16 @@ if [ -z "$target_user_home" ]; then
     exit 1
 else
     sv_echo_block "+ Detected target user home directory '$target_user_home'"
+fi
+
+if [ "$extended_env" = "y" ]; then
+    if which bash > /dev/null 2>&1; then
+        sv_echo_block "+ Using extended user environment"
+    else
+        sv_echo_block "= Error: bash should be available to use extended user environment"
+        sv_echo_block_end
+        exit 1
+    fi
 fi
 
 local_path="$target_user_home/$local_sub_path"
@@ -440,11 +455,22 @@ sv_echo_block_end
 #
 sv_echo_block_start "Creating global config '$sv_run_config'"
 
-cat <<- EOM > "${sv_run_config}"
+if [ "$extended_env" != "y" ]; then
+    cat <<- EOM > "${sv_run_config}"
 [program:${target_user}-supervisor]
 command=${supervisord_bin} -n -c ${local_config}
 user=${target_user}
 EOM
+else
+    cat <<- EOM > "${sv_run_config}"
+[program:${target_user}-supervisor]
+command=bash -lc "${supervisord_bin} -n -c ${local_config}"
+user=${target_user}
+environment=
+    HOME=${target_user_home}
+EOM
+fi
+
 sv_echo_block "= Ok"
 sv_echo_block_end
 
