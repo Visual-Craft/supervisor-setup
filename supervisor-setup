@@ -339,7 +339,7 @@ sv_echo_block "+ '$local_ctl_bin'"
 cat <<- EOM | su "${target_user}" -c "cat > "${local_ctl_bin}""
 #!/bin/sh
 
-/usr/bin/supervisorctl -c ${local_config} \$@
+exec /usr/bin/supervisorctl -c ${local_config} "\$@"
 EOM
 su "${target_user}" -c "chmod u+x "${local_ctl_bin}""
 
