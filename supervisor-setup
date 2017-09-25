@@ -25,8 +25,10 @@ sv_echo_block_end() {
 sv_usage() {
     sv_echo "Usage: $script user [options]"
     sv_echo "Options:"
-    sv_echo "  -u update mode (overwrite existing installation)"
-    sv_echo "  -r remove mode (remove existing installation)"
+    sv_echo "  -u|--update    update mode (overwrite existing installation)"
+    sv_echo "  -r|--remove    remove mode (remove existing installation)"
+    sv_echo "  -e             use extended env (run supervisor via login shell)"
+    sv_echo "  -h|--help      show usage message and exit"
 }
 
 sv_echo "== Supervisor setup script v${script_version}\n"
