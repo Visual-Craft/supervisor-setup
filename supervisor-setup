@@ -103,6 +103,15 @@ if which dpkg > /dev/null 2>&1; then
     supervisord_bin="/usr/bin/supervisord"
     supervisorctl_bin="/usr/bin/supervisorctl"
     supervisor_global_conf_d="/etc/supervisor/conf.d"
+    supervisor_global_conf_ext=".conf"
+elif [ -f "/etc/alpine-release" ]; then
+    sv_echo_block "+ Running on Alpine-based system"
+
+    system_type="alpine"
+    supervisord_bin="/usr/bin/supervisord"
+    supervisorctl_bin="/usr/bin/supervisorctl"
+    supervisor_global_conf_d="/etc/supervisor.d"
+    supervisor_global_conf_ext=".ini"
 else
     sv_echo_block "= Error: this script is intended to be run on Debian based systems"
     sv_echo_block_end
@@ -154,7 +163,7 @@ local_ctl_bin="$local_path/bin/sv-ctl"
 local_create_bin="$local_path/bin/sv-create"
 local_install_bin="$local_path/bin/sv-install"
 local_config="$local_path/etc/supervisord.conf"
-sv_run_config="$supervisor_global_conf_d/$target_user-supervisor.conf"
+sv_run_config="$supervisor_global_conf_d/$target_user-supervisor$supervisor_global_conf_ext"
 
 sv_echo_block "+ Using local path '$local_path'"
 
@@ -231,6 +240,22 @@ case "$system_type" in
             fi
 
             if apt-get install -y --no-install-recommends "${supervisor_package}" > /dev/null 2>&1; then
+                sv_echo_block "= Ok"
+                sv_echo_block_end
+            else
+                sv_echo_block "= Error"
+                sv_echo_block_end
+                exit 1
+            fi
+        fi
+    ;;
+
+    "alpine")
+        if which "$supervisord_bin" > /dev/null 2>&1; then
+            sv_echo_block "= Ok (already installed)"
+            sv_echo_block_end
+        else
+            if apk --no-cache add supervisor > /dev/null 2>&1; then
                 sv_echo_block "= Ok"
                 sv_echo_block_end
             else
