@@ -511,8 +511,11 @@ sv_echo_block_end
 # Supervisor start
 #
 sv_echo_block_start "Starting local supervisor process"
-"$supervisorctl_bin" update > /dev/null 2>&1
-sv_echo_block "= Ok"
+if "$supervisorctl_bin" update > /dev/null 2>&1; then
+    sv_echo_block "= Ok"
+else
+    sv_echo_block "= Error: is global supervisor process running?"
+fi
 sv_echo_block_end
 
 
