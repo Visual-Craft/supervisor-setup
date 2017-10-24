@@ -99,7 +99,6 @@ if which dpkg > /dev/null 2>&1; then
     sv_echo_block "+ Running on Debian-based system"
 
     system_type="debian"
-    supervisor_package="supervisor"
     supervisord_bin="/usr/bin/supervisord"
     supervisorctl_bin="/usr/bin/supervisorctl"
     supervisor_global_conf_d="/etc/supervisor/conf.d"
@@ -229,7 +228,7 @@ sv_echo_block_start "Installing Supervisor"
 
 case "$system_type" in
     "debian")
-        if dpkg -s "${supervisor_package}" > /dev/null 2>&1; then
+        if dpkg -s supervisor > /dev/null 2>&1; then
             sv_echo_block "= Ok (already installed)"
             sv_echo_block_end
         else
@@ -239,7 +238,7 @@ case "$system_type" in
                 exit 1
             fi
 
-            if apt-get install -y --no-install-recommends "${supervisor_package}" > /dev/null 2>&1; then
+            if apt-get install -y --no-install-recommends supervisor > /dev/null 2>&1; then
                 sv_echo_block "= Ok"
                 sv_echo_block_end
             else
