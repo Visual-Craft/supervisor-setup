@@ -282,9 +282,7 @@ for bin in "$supervisord_bin" "$supervisorctl_bin"; do
 done
 
 if [ ! -e "$supervisor_global_conf_d" ]; then
-    sv_echo_block "= Error: Supervisor config directory '$supervisor_global_conf_d' is missing"
-    sv_echo_block_end
-    exit 1
+    sv_echo_block "= Notice: Supervisor config directory '$supervisor_global_conf_d' is missing"
 fi
 
 if [ -e "$sv_run_config" ]; then
@@ -480,6 +478,13 @@ sv_echo_block_end
 # Global config setup
 #
 sv_echo_block_start "Creating global config '$sv_run_config'"
+
+sv_run_config_dir="$(dirname "$sv_run_config")"
+
+if [ ! -e "$sv_run_config_dir" ]; then
+    sv_echo_block "+ Creating global config directory '$sv_run_config_dir'"
+    mkdir -p "$sv_run_config_dir"
+fi
 
 if [ "$extended_env" != "y" ]; then
     cat <<- EOM > "${sv_run_config}"
