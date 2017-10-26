@@ -495,8 +495,7 @@ cat <<- EOM > "${sv_run_config}"
 command=${local_supervisord_launch_cmd}
 user=${target_user}
 directory=${target_user_home}
-environment=
-    HOME=${target_user_home}
+environment=HOME="${target_user_home}",USER="${target_user}"
 EOM
 
 sv_echo_block "= Ok"
