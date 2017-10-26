@@ -359,7 +359,7 @@ sv_echo_block_end
 sv_echo_block_start "Creating executables"
 
 if [ "$update" = "y" -a -e "${local_path}/bin" ]; then
-    su "${target_user}" -c "rm "${local_path}/bin/*""
+    su "${target_user}" -c "rm -f "${local_path}/bin/"*"
 fi
 
 # sv-ctl
