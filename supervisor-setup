@@ -494,6 +494,7 @@ cat <<- EOM > "${sv_run_config}"
 [program:${target_user}-supervisor]
 command=${local_supervisord_launch_cmd}
 user=${target_user}
+directory=${target_user_home}
 environment=
     HOME=${target_user_home}
 EOM
