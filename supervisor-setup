@@ -150,6 +150,7 @@ fi
 local_path="$target_user_home/$local_sub_path"
 local_ctl_bin="$local_path/bin/sv-ctl"
 local_create_bin="$local_path/bin/sv-create"
+local_remove_bin="$local_path/bin/sv-remove"
 local_install_bin="$local_path/bin/sv-install"
 local_config="$local_path/etc/supervisord.conf"
 local_supervisord_launch_cmd="${supervisord_bin} -n -c ${local_config}"
@@ -207,7 +208,7 @@ else
         fi
     fi
 
-    for bin in "$local_ctl_bin" "$local_create_bin"; do
+    for bin in "$local_ctl_bin" "$local_create_bin" "$local_remove_bin"; do
         if [ -e "$bin" ]; then
             if [ "$update" != "y" ]; then
                 sv_echo_block "Error: local bin '$bin' already exists"
@@ -403,6 +404,34 @@ EOM
 sv_echo "'\${config}' created"
 EOM_
 su "${target_user}" -c "chmod u+x "${local_create_bin}""
+
+# sv-remove
+sv_echo_block "+ '$local_remove_bin'"
+cat <<- EOM_ | su "${target_user}" -c "cat > "${local_remove_bin}""
+#!/bin/sh
+
+set -ue
+sv_echo() { echo "\$@" 1>&2; }
+
+target_dir="${local_path}/etc/conf.d"
+name="\${1-}"
+
+if [ -z "\$name" ]; then
+    sv_echo "Usage: \$0 name"
+    exit 1
+fi
+
+config="\$target_dir/\${name}.conf"
+
+if [ ! -e "\$config" ]; then
+    sv_echo "Config file '\$config' does not exists"
+    exit 1
+fi
+
+rm -f "\$config"
+sv_echo "'\${config}' removed"
+EOM_
+su "${target_user}" -c "chmod u+x "${local_remove_bin}""
 
 # sv-install
 sv_echo_block "+ '$local_install_bin'"
