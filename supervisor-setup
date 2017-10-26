@@ -490,21 +490,13 @@ if [ ! -e "$sv_run_config_dir" ]; then
     mkdir -p "$sv_run_config_dir"
 fi
 
-if [ "$extended_env" != "y" ]; then
-    cat <<- EOM > "${sv_run_config}"
-[program:${target_user}-supervisor]
-command=${local_supervisord_launch_cmd}
-user=${target_user}
-EOM
-else
-    cat <<- EOM > "${sv_run_config}"
+cat <<- EOM > "${sv_run_config}"
 [program:${target_user}-supervisor]
 command=${local_supervisord_launch_cmd}
 user=${target_user}
 environment=
     HOME=${target_user_home}
 EOM
-fi
 
 sv_echo_block "= Ok"
 sv_echo_block_end
