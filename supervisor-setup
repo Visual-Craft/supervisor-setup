@@ -2,6 +2,18 @@
 
 set -ue
 
+if which dpkg > /dev/null 2>&1; then
+    system_type="debian"
+elif [ -f "/etc/alpine-release" ]; then
+    system_type="alpine"
+elif [ "$(uname)" == "Darwin" ]; then
+    system_type="macos"
+else
+    sv_echo_block "= Error: this script is intended to be run on Debian/MacOS based systems"
+    sv_echo_block_end
+    exit 1
+fi
+
 script_version="1.0"
 # path to directory, where local supervisor files will be stored (relative to user's home directory)
 local_sub_path=".supervisor"
@@ -25,15 +37,20 @@ sv_echo_block_end() {
 sv_usage() {
     sv_echo "Usage: $script user [options]"
     sv_echo "Options:"
-    sv_echo "  -u|--update    update mode (overwrite existing installation)"
-    sv_echo "  -r|--remove    remove mode (remove existing installation)"
-    sv_echo "  -e             use extended env (run supervisor via login shell)"
-    sv_echo "  -h|--help      show usage message and exit"
+    sv_echo "  -u    update mode (overwrite existing installation)"
+    sv_echo "  -r    remove mode (remove existing installation)"
+    sv_echo "  -e    use extended env (run supervisor via login shell)"
+    sv_echo "  -h    show usage message and exit"
 }
 
 sv_echo "== Supervisor setup script v${script_version}\n"
 
-args="$(getopt -o urhe -l "update,remove,help" -n "$script" -- "$@")"
+if [ "$system_type" == "macos" ]; then
+    args="$(getopt urhe "" $*)"
+else
+    args="$(getopt -o urhe -n "$script" -- "$@")"
+fi
+echo $args
 
 if [ $? -ne 0 ]; then
     exit 1
@@ -42,6 +59,7 @@ fi
 eval set -- "${args}"
 
 while true; do
+echo "$1"
     case "$1" in
         -u|--update)
             update="y"
@@ -61,7 +79,9 @@ while true; do
         ;;
         --)
             shift
-            break
+            if [ $system_type != "macos" ]; then
+                break
+            fi
         ;;
         *)
             sv_echo "Unsupported option '$1'"
@@ -69,6 +89,8 @@ while true; do
         ;;
     esac
 done
+
+exit 1
 
 if [ "$update" = "y" -a "$remove" = "y" ]; then
     sv_echo "Unable to use update and remove mode at the same time"
@@ -95,24 +117,29 @@ else
     sv_echo_block "+ Running from root"
 fi
 
-if which dpkg > /dev/null 2>&1; then
+if [ $system_type == "debian" ]; then
     sv_echo_block "+ Running on Debian-based system"
 
-    system_type="debian"
     supervisord_bin="/usr/bin/supervisord"
     supervisorctl_bin="/usr/bin/supervisorctl"
     supervisor_global_conf_d="/etc/supervisor/conf.d"
     supervisor_global_conf_ext=".conf"
-elif [ -f "/etc/alpine-release" ]; then
+elif [ $system_type == "alpine" ]; then
     sv_echo_block "+ Running on Alpine-based system"
 
-    system_type="alpine"
     supervisord_bin="/usr/bin/supervisord"
     supervisorctl_bin="/usr/bin/supervisorctl"
     supervisor_global_conf_d="/etc/supervisor.d"
     supervisor_global_conf_ext=".ini"
+elif [ $system_type == "macos" ]; then
+    sv_echo_block "+ Running on MacOS system"
+
+    supervisord_bin="/Applications/MAMP/Library/bin/supervisord"
+    supervisorctl_bin="/Applications/MAMP/Library/bin/supervisorctl"
+    supervisor_global_conf_d="/etc/supervisor.d"
+    supervisor_global_conf_ext=".ini"
 else
-    sv_echo_block "= Error: this script is intended to be run on Debian based systems"
+    sv_echo_block "= Error: this script is intended to be run on Debian/MacOS based systems"
     sv_echo_block_end
     exit 1
 fi
@@ -129,7 +156,13 @@ else
     sv_echo_block "+ Target user is exist"
 fi
 
-if [ "$target_user_id" -lt 1000 ]; then
+if [ $system_type == "macos" ]; then
+    if [ "$target_user_id" -lt 500 ]; then
+        sv_echo_block "= Error: target user should not be system account"
+        sv_echo_block_end
+        exit 1
+    fi
+elif [ "$target_user_id" -lt 1000 ]; then
     sv_echo_block "= Error: target user should not be system account"
     sv_echo_block_end
     exit 1
@@ -263,6 +296,40 @@ case "$system_type" in
                 sv_echo_block "= Ok"
                 sv_echo_block_end
             else
+                sv_echo_block "= Error"
+                sv_echo_block_end
+                exit 1
+            fi
+        fi
+    ;;
+
+    "macos")
+        if which "$supervisord_bin" > /dev/null 2>&1; then
+            sv_echo_block "= Ok (already installed)"
+            sv_echo_block_end
+        else
+            if ! which "pip" > /dev/null 2>&1; then
+                if ! which "easy_install" > /dev/null 2>&1; then
+                    sv_echo_block "+ installing easy_install"
+                    if ! brew install distribute > /dev/null 2>&1; then
+                        sv_echo_block "= Error"
+                        sv_echo_block_end
+                        exit 1
+                    fi
+                fi
+
+                sv_echo_block "+ installing pip"
+
+                if ! easy_install pip > /dev/null 2>&1; then
+                    sv_echo_block "= Error"
+                    sv_echo_block_end
+                    exit 1
+                fi
+            fi
+
+            sv_echo_block "+ installing supervisor"
+
+            if ! pip install supervisor > /dev/null 2>&1; then
                 sv_echo_block "= Error"
                 sv_echo_block_end
                 exit 1
